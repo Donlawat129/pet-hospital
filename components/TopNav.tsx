@@ -1,15 +1,44 @@
 // components/TopNav.tsx
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
-import { signOut } from "firebase/auth";
-import { auth } from "@/lib/firebase";
+import { onAuthStateChanged, signOut } from "firebase/auth";
+import { auth, db } from "@/lib/firebase";
+import { doc, getDoc } from "firebase/firestore";
 
 export default function TopNav() {
   const router = useRouter();
   const pathname = usePathname();
+
   const [loggingOut, setLoggingOut] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  // --- โหลด role เพื่อเช็คว่าเป็น admin ไหม ---
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, async (user) => {
+      if (!user) {
+        setIsAdmin(false);
+        return;
+      }
+
+      try {
+        const ref = doc(db, "users", user.uid);
+        const snap = await getDoc(ref);
+        if (snap.exists()) {
+          const data = snap.data() as { role?: string };
+          setIsAdmin(data.role === "admin");
+        } else {
+          setIsAdmin(false);
+        }
+      } catch (err) {
+        console.error("Load role error in TopNav:", err);
+        setIsAdmin(false);
+      }
+    });
+
+    return () => unsub();
+  }, []);
 
   async function handleLogout() {
     try {
@@ -24,11 +53,11 @@ export default function TopNav() {
     }
   }
 
-  const navButtonBase =
-    "text-sm px-3 py-1.5 rounded-full transition border";
+  const navButtonBase = "text-sm px-3 py-1.5 rounded-full transition border";
 
   const isServices = pathname === "/services";
   const isHistory = pathname === "/history";
+  const isDashboard = pathname?.startsWith("/dashboard");
 
   return (
     <header className="sticky top-0 z-20 border-b border-emerald-100 bg-white/80 backdrop-blur">
@@ -77,6 +106,20 @@ export default function TopNav() {
           >
             ประวัติการใช้บริการ
           </button>
+
+          {/* ปุ่มไปหน้า Dashboard เฉพาะ admin */}
+          {isAdmin && !isDashboard && (
+            <button
+              type="button"
+              onClick={() => router.push("/dashboard")}
+              className={[
+                navButtonBase,
+                "border-sky-300 bg-sky-50 text-sky-700 hover:bg-sky-100",
+              ].join(" ")}
+            >
+              ไปหน้า Dashboard
+            </button>
+          )}
 
           <button
             type="button"

@@ -1,3 +1,4 @@
+// app/page.tsx
 "use client";
 
 import { useState, type FormEvent } from "react";
