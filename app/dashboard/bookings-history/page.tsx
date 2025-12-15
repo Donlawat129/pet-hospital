@@ -1,3 +1,4 @@
+// app/dashboard/bookings-history/page.tsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -77,6 +78,11 @@ type BookingHistoryRow = {
   time: string;
   note: string;
   createdAt: Date | null;
+
+  // ฟิลด์ใหม่
+  ownerName?: string;
+  petName?: string;
+  weightKg?: number | null;
 };
 
 type BookingDocData = {
@@ -88,6 +94,11 @@ type BookingDocData = {
   time?: string;
   note?: string;
   createdAt?: Timestamp;
+
+  ownerName?: string;
+  petName?: string;
+  // รองรับทั้ง number / string / undefined
+  weightKg?: unknown;
 };
 
 type ServiceFilter = "all" | ServiceId;
@@ -122,7 +133,8 @@ export default function BookingsHistoryPage() {
       setCheckingAuth(false);
 
       try {
-        const ref = doc(db, "users");
+        // ✅ แก้ path ให้ถูกต้อง: users/{uid}
+        const ref = doc(db, "users", firebaseUser.uid);
         const snap = await getDoc(ref);
         const data = snap.data() as { role?: string } | undefined;
 
@@ -164,6 +176,15 @@ export default function BookingsHistoryPage() {
 
           const dateObj = dateTs ? dateTs.toDate() : new Date();
 
+          // แปลงน้ำหนักให้เป็น number | null อย่างปลอดภัย
+          let weight: number | null = null;
+          if (typeof data.weightKg === "number") {
+            weight = data.weightKg;
+          } else if (typeof data.weightKg === "string") {
+            const n = Number(data.weightKg);
+            if (!Number.isNaN(n)) weight = n;
+          }
+
           return {
             id: docSnap.id,
             userId: data.userId ?? "",
@@ -175,6 +196,9 @@ export default function BookingsHistoryPage() {
             time: data.time ?? "",
             note: data.note ?? "",
             createdAt: createdAtTs ? createdAtTs.toDate() : null,
+            ownerName: data.ownerName ?? "",
+            petName: data.petName ?? "",
+            weightKg: weight,
           };
         });
 
@@ -224,11 +248,21 @@ export default function BookingsHistoryPage() {
         const service = r.serviceTitle.toLowerCase();
         const note = r.note.toLowerCase();
         const time = r.time.toLowerCase();
+        const owner = (r.ownerName ?? "").toLowerCase();
+        const pet = (r.petName ?? "").toLowerCase();
+        const weightStr =
+          r.weightKg != null && !Number.isNaN(r.weightKg)
+            ? r.weightKg.toString()
+            : "";
+
         return (
           emailOrId.includes(q) ||
           service.includes(q) ||
           note.includes(q) ||
-          time.includes(q)
+          time.includes(q) ||
+          owner.includes(q) ||
+          pet.includes(q) ||
+          weightStr.includes(q)
         );
       });
     }
@@ -302,14 +336,14 @@ export default function BookingsHistoryPage() {
             {/* ค้นหา */}
             <div className="flex-1 min-w-[200px]">
               <label className="block text-xs font-medium text-emerald-900 mb-1">
-                ค้นหา (อีเมล / ชื่อบริการ / หมายเหตุ / เวลา)
+                ค้นหา (อีเมล / ชื่อบริการ / เจ้าของ / น้อง / หมายเหตุ / เวลา)
               </label>
               <input
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 className="w-full rounded-lg border border-emerald-200 bg-white px-3 py-1.5 text-sm text-black outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200"
-                placeholder="เช่น ชื่อลูกค้า, อาบน้ำ, 10:30 เป็นต้น"
+                placeholder="เช่น ชื่อลูกค้า, ชื่อเจ้าของ, ชื่อน้อง, อาบน้ำ, 10:30 เป็นต้น"
               />
             </div>
 
@@ -386,7 +420,10 @@ export default function BookingsHistoryPage() {
                   <tr>
                     <th className="px-3 py-2 text-left">วันนัด / เวลา</th>
                     <th className="px-3 py-2 text-left">บริการ</th>
-                    <th className="px-3 py-2 text-left">ลูกค้า</th>
+                    <th className="px-3 py-2 text-left">
+                      เจ้าของ / สัตว์เลี้ยง / น้ำหนัก
+                    </th>
+                    <th className="px-3 py-2 text-left">ลูกค้า (อีเมล)</th>
                     <th className="px-3 py-2 text-left">หมายเหตุ</th>
                     <th className="px-3 py-2 text-left">สร้างเมื่อ</th>
                   </tr>
@@ -408,10 +445,47 @@ export default function BookingsHistoryPage() {
                       <td className="px-3 py-2 align-top">
                         <div className="flex items-center gap-1 text-sm">
                           <span>
-                            {SERVICES.find((s) => s.id === r.serviceId)?.icon}
+                            {
+                              SERVICES.find(
+                                (s) => s.id === r.serviceId
+                              )?.icon
+                            }
                           </span>
                           <span>{r.serviceTitle}</span>
                         </div>
+                      </td>
+                      <td className="px-3 py-2 align-top text-xs">
+                        {r.ownerName || r.petName || r.weightKg != null ? (
+                          <div className="space-y-0.5">
+                            {r.ownerName && (
+                              <div>
+                                เจ้าของ:{" "}
+                                <span className="font-medium">
+                                  {r.ownerName}
+                                </span>
+                              </div>
+                            )}
+                            {r.petName && (
+                              <div>
+                                น้อง:{" "}
+                                <span className="font-medium">
+                                  {r.petName}
+                                </span>
+                              </div>
+                            )}
+                            {r.weightKg != null &&
+                              !Number.isNaN(r.weightKg) && (
+                                <div>
+                                  น้ำหนัก:{" "}
+                                  <span className="font-medium">
+                                    {r.weightKg.toFixed(1)} กก.
+                                  </span>
+                                </div>
+                              )}
+                          </div>
+                        ) : (
+                          <span className="text-slate-400">-</span>
+                        )}
                       </td>
                       <td className="px-3 py-2 align-top text-xs">
                         <div className="font-medium text-slate-800">

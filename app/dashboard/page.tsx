@@ -87,6 +87,11 @@ type AdminBookingRow = {
   time: string;
   note: string;
   createdAt: Date | null;
+
+  // ---- ฟิลด์ใหม่ ----
+  ownerName: string;
+  petName: string;
+  petWeightKg: number | null;
 };
 
 type BookingDocData = {
@@ -98,6 +103,11 @@ type BookingDocData = {
   time?: string;
   note?: string;
   createdAt?: Timestamp;
+
+  // ---- ฟิลด์ใหม่ใน Firestore ----
+  ownerName?: string;
+  petName?: string;
+  petWeightKg?: number;
 };
 
 export default function AdminDashboardPage() {
@@ -195,6 +205,14 @@ export default function AdminDashboardPage() {
             time: data.time ?? "",
             note: data.note ?? "",
             createdAt: createdAtTs ? createdAtTs.toDate() : null,
+
+            // ค่าใหม่ (fallback ถ้าเอกสารเก่ายังไม่มี field)
+            ownerName: data.ownerName ?? "",
+            petName: data.petName ?? "",
+            petWeightKg:
+              typeof data.petWeightKg === "number"
+                ? data.petWeightKg
+                : null,
           };
         });
 
@@ -283,7 +301,7 @@ export default function AdminDashboardPage() {
                 ไปหน้าจองคิว (มุมมองลูกค้า)
               </button>
 
-              {/* ปุ่มใหม่: ไปหน้าประวัติทั้งหมด */}
+              {/* ปุ่มไปหน้าประวัติทั้งหมด */}
               <button
                 type="button"
                 onClick={() => router.push("/dashboard/bookings-history")}
@@ -369,7 +387,7 @@ export default function AdminDashboardPage() {
           ))}
         </section>
 
-        {/* ตารางคิวลูกค้า */}
+        {/* ตารางคิวลูกค้า (การ์ด) */}
         <section className="space-y-3">
           <h2 className="text-sm font-semibold text-slate-800">
             รายการคิวของวันที่เลือก
@@ -405,9 +423,34 @@ export default function AdminDashboardPage() {
                       {b.serviceTitle}
                     </p>
                     <p className="text-xs text-slate-500">
-                      เวลา {b.time} น. ·{" "}
-                      {formatThaiDateFull(b.date)}
+                      เวลา {b.time} น. · {formatThaiDateFull(b.date)}
                     </p>
+
+                    {/* แสดงเจ้าของ / สัตว์เลี้ยง / น้ำหนัก */}
+                    {(b.ownerName || b.petName || b.petWeightKg !== null) && (
+                      <p className="mt-1 text-xs text-slate-600">
+                        {b.ownerName && (
+                          <>
+                            เจ้าของ: <span className="font-medium">{b.ownerName}</span>
+                          </>
+                        )}
+                        {b.petName && (
+                          <>
+                            {b.ownerName ? " · " : ""}สัตว์เลี้ยง:{" "}
+                            <span className="font-medium">{b.petName}</span>
+                          </>
+                        )}
+                        {b.petWeightKg !== null && (
+                          <>
+                            {b.ownerName || b.petName ? " · " : ""}น้ำหนัก:{" "}
+                            <span className="font-medium">
+                              {b.petWeightKg} กก.
+                            </span>
+                          </>
+                        )}
+                      </p>
+                    )}
+
                     {b.note && (
                       <p className="mt-1 text-xs text-slate-600">
                         หมายเหตุลูกค้า: {b.note}

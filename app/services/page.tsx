@@ -50,7 +50,15 @@ const SERVICES: {
 ];
 
 // ---- helper สำหรับวันที่และเวลา ----
-const TH_DOW = ["อาทิตย์", "จันทร์", "อังคาร", "พุธ", "พฤหัสบดี", "ศุกร์", "เสาร์"];
+const TH_DOW = [
+  "อาทิตย์",
+  "จันทร์",
+  "อังคาร",
+  "พุธ",
+  "พฤหัสบดี",
+  "ศุกร์",
+  "เสาร์",
+];
 const TH_MONTH_SHORT = [
   "ม.ค.",
   "ก.พ.",
@@ -98,9 +106,19 @@ export default function ServicesPage() {
   const now = new Date();
   const nowMinutes = now.getHours() * 60 + now.getMinutes();
 
-  const [selectedService, setSelectedService] = useState<ServiceId | null>(null);
-  const [selectedDateIndex, setSelectedDateIndex] = useState<number | null>(null);
+  const [selectedService, setSelectedService] = useState<ServiceId | null>(
+    null
+  );
+  const [selectedDateIndex, setSelectedDateIndex] = useState<number | null>(
+    null
+  );
   const [selectedTime, setSelectedTime] = useState<string | null>(null);
+
+  // ฟิลด์ใหม่
+  const [ownerName, setOwnerName] = useState<string>("");
+  const [petName, setPetName] = useState<string>("");
+  const [petWeight, setPetWeight] = useState<string>(""); // เก็บเป็น string ในฟอร์ม แล้วค่อย parse เป็น number ตอนบันทึก
+
   const [note, setNote] = useState<string>("");
   const [saving, setSaving] = useState(false);
 
@@ -110,7 +128,7 @@ export default function ServicesPage() {
 
   const bookingSectionRef = useRef<HTMLDivElement | null>(null);
 
-  // เวลาเปิด-ปิดร้าน: 08:30 - 17:30 → ช่วงละ 1 ชม.
+  // เวลาเปิด-ปิดร้าน: 10:00 - 18:00
   const timeSlots = useMemo(
     () => [
       "10:00",
@@ -152,10 +170,18 @@ export default function ServicesPage() {
     setSelectedDateIndex(null);
     setSelectedTime(null);
     setNote("");
+
+    // reset เวลาที่จอง + ข้อมูลน้อง (อยากให้เริ่มใหม่เมื่อเปลี่ยนประเภทบริการ)
     setBookedTimes([]);
+    setOwnerName("");
+    setPetName("");
+    setPetWeight("");
 
     if (bookingSectionRef.current) {
-      bookingSectionRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
+      bookingSectionRef.current.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
     }
   }
 
@@ -222,6 +248,32 @@ export default function ServicesPage() {
     const date = days[selectedDateIndex];
     const service = SERVICES.find((s) => s.id === selectedService);
 
+    const owner = ownerName.trim();
+    const pet = petName.trim();
+    const weightStr = petWeight.trim();
+    const weightNum =
+      weightStr === "" ? null : Number.parseFloat(weightStr.replace(",", "."));
+
+    // validate เบื้องต้น
+    if (!owner || !pet) {
+      alert("กรุณากรอกชื่อเจ้าของ และชื่อสัตว์เลี้ยงให้ครบ");
+      return;
+    }
+
+    // ถ้ามีกรอกน้ำหนัก ให้ตรวจรูปแบบด้วย
+    if (weightStr !== "") {
+      // กันเคส parse ไม่ได้
+      if (weightNum === null) {
+        alert("กรุณากรอกน้ำหนักเป็นตัวเลขมากกว่า 0");
+        return;
+      }
+
+      if (Number.isNaN(weightNum) || weightNum <= 0) {
+        alert("กรุณากรอกน้ำหนักเป็นตัวเลขมากกว่า 0");
+        return;
+      }
+    }
+
     try {
       setSaving(true);
 
@@ -234,20 +286,35 @@ export default function ServicesPage() {
         time: selectedTime,
         note: note.trim(),
         createdAt: serverTimestamp(),
+
+        // ฟิลด์ใหม่
+        ownerName: owner,
+        petName: pet,
+        petWeightKg: weightNum,
       });
 
       // อัพเดทให้ช่องเวลานี้เป็น "เต็ม" ทันที
       setBookedTimes((prev) =>
-        selectedTime && !prev.includes(selectedTime) ? [...prev, selectedTime] : prev
+        selectedTime && !prev.includes(selectedTime)
+          ? [...prev, selectedTime]
+          : prev
       );
 
-      alert(
+      let msg =
         `จองคิวสำเร็จ\n` +
-          `บริการ: ${service?.title ?? selectedService}\n` +
-          `วันที่: ${formatThaiDateFull(date)}\n` +
-          `เวลา: ${selectedTime} น.\n` +
-          (note ? `หมายเหตุ: ${note}` : "")
-      );
+        `บริการ: ${service?.title ?? selectedService}\n` +
+        `วันที่: ${formatThaiDateFull(date)}\n` +
+        `เวลา: ${selectedTime} น.\n` +
+        `เจ้าของ: ${owner}\n` +
+        `สัตว์เลี้ยง: ${pet}\n`;
+      if (weightNum !== null) {
+        msg += `น้ำหนัก: ${weightNum} กก.\n`;
+      }
+      if (note.trim()) {
+        msg += `หมายเหตุ: ${note.trim()}`;
+      }
+
+      alert(msg);
     } catch (err) {
       console.error(err);
       alert("ไม่สามารถจองคิวได้ กรุณาลองใหม่อีกครั้ง");
@@ -285,7 +352,9 @@ export default function ServicesPage() {
               ].join(" ")}
             >
               <div className="text-2xl mb-2">{service.icon}</div>
-              <div className="font-semibold text-slate-800">{service.title}</div>
+              <div className="font-semibold text-slate-800">
+                {service.title}
+              </div>
               <div className="text-xs text-slate-500 mt-1">
                 {service.description}
               </div>
@@ -396,19 +465,65 @@ export default function ServicesPage() {
                         <div>{time}</div>
 
                         {isPast && (
-                          <div className="text-[11px] font-medium">
-                            หมดเวลา
-                          </div>
+                          <div className="text-[11px] font-medium">หมดเวลา</div>
                         )}
 
                         {!isPast && full && (
-                          <div className="text-[11px] font-medium">
-                            เต็ม
-                          </div>
+                          <div className="text-[11px] font-medium">เต็ม</div>
                         )}
                       </button>
                     );
                   })}
+                </div>
+              </div>
+            )}
+
+            {/* ข้อมูลเจ้าของ & สัตว์เลี้ยง */}
+            {selectedDateIndex !== null && (
+              <div className="mb-4 space-y-3">
+                <p className="text-sm font-medium text-slate-700">
+                  ข้อมูลเจ้าของ & สัตว์เลี้ยง
+                </p>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 mb-1">
+                      ชื่อเจ้าของ <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={ownerName}
+                      onChange={(e) => setOwnerName(e.target.value)}
+                      className="w-full rounded-xl border border-emerald-100 bg-white px-3 py-2 text-sm text-black outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
+                      placeholder="เช่น คุณเอิร์ธ"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 mb-1">
+                      ชื่อสัตว์เลี้ยง <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={petName}
+                      onChange={(e) => setPetName(e.target.value)}
+                      className="w-full rounded-xl border border-emerald-100 bg-white px-3 py-2 text-sm text-black outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
+                      placeholder="เช่น น้องปอม, น้องหมูทอด"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">
+                    น้ำหนักโดยประมาณ (กก.)
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.1"
+                    value={petWeight}
+                    onChange={(e) => setPetWeight(e.target.value)}
+                    className="w-full max-w-xs rounded-xl border border-emerald-100 bg-white px-3 py-2 text-sm text-black outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
+                    placeholder="เช่น 4.5"
+                  />
                 </div>
               </div>
             )}
@@ -424,7 +539,7 @@ export default function ServicesPage() {
                   value={note}
                   onChange={(e) => setNote(e.target.value)}
                   className="w-full rounded-xl border border-emerald-100 bg-white px-3 py-2 text-sm text-black outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 resize-none"
-                  placeholder="กรุณาใส่ชื่อน้อง หรือความต้องการอื่นๆ เช่น น้องกลัวไดร์เสียงดัง, ขนพันกันง่าย, ขอใช้แชมพูสูตรอ่อนโยนพิเศษ ฯลฯ"
+                  placeholder="เช่น น้องกลัวไดร์เสียงดัง, ขนพันกันง่าย, ขอใช้แชมพูสูตรอ่อนโยนพิเศษ ฯลฯ"
                 />
               </div>
             )}
@@ -437,22 +552,44 @@ export default function ServicesPage() {
                 </h3>
                 <div className="space-y-1 text-sm text-slate-700">
                   <p>
-                    <span className="font-medium text-slate-500">
-                      บริการ:
-                    </span>{" "}
+                    <span className="font-medium text-slate-500">บริการ:</span>{" "}
                     {SERVICES.find((s) => s.id === selectedService)?.title}
                   </p>
                   <p>
-                    <span className="font-medium text-slate-500">
-                      วันที่:
-                    </span>{" "}
+                    <span className="font-medium text-slate-500">วันที่:</span>{" "}
                     {formatThaiDateFull(days[selectedDateIndex])}
                   </p>
                   <p>
-                    <span className="font-medium text-slate-500">
-                      เวลา:
-                    </span>{" "}
+                    <span className="font-medium text-slate-500">เวลา:</span>{" "}
                     {selectedTime} น.
+                  </p>
+                  <p>
+                    <span className="font-medium text-slate-500">เจ้าของ:</span>{" "}
+                    {ownerName || (
+                      <span className="text-slate-400 italic">
+                        ยังไม่ได้ระบุ
+                      </span>
+                    )}
+                  </p>
+                  <p>
+                    <span className="font-medium text-slate-500">
+                      สัตว์เลี้ยง:
+                    </span>{" "}
+                    {petName || (
+                      <span className="text-slate-400 italic">
+                        ยังไม่ได้ระบุ
+                      </span>
+                    )}
+                  </p>
+                  <p>
+                    <span className="font-medium text-slate-500">น้ำหนัก:</span>{" "}
+                    {petWeight ? (
+                      `${petWeight} กก.`
+                    ) : (
+                      <span className="text-slate-400 italic">
+                        ยังไม่ได้ระบุ
+                      </span>
+                    )}
                   </p>
                   <p className="flex gap-1">
                     <span className="font-medium text-slate-500">
@@ -479,6 +616,8 @@ export default function ServicesPage() {
                   !selectedService ||
                   selectedDateIndex === null ||
                   !selectedTime ||
+                  !ownerName.trim() ||
+                  !petName.trim() ||
                   saving
                 }
                 className={[

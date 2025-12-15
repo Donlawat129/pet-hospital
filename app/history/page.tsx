@@ -21,6 +21,11 @@ type BookingRow = {
   date: Date;
   time: string;
   note?: string;
+
+  // 👇 เพิ่มฟิลด์ใหม่
+  ownerName?: string;
+  petName?: string;
+  weightKg?: number | null;
 };
 
 // type สำหรับข้อมูลดิบที่อยู่ใน Firestore
@@ -30,6 +35,11 @@ type BookingDocData = {
   date: Timestamp;
   time?: string;
   note?: string;
+
+  // 👇 ให้ตรงกับที่บันทึกจากหน้าจองคิว
+  ownerName?: string;
+  petName?: string;
+  weightKg?: number;
 };
 
 const TH_MONTH_SHORT = [
@@ -79,12 +89,18 @@ export default function HistoryPage() {
           const data = docSnap.data() as BookingDocData;
           const dateObj = data.date.toDate();
 
+          const weight =
+            typeof data.weightKg === "number" ? data.weightKg : null;
+
           return {
             id: docSnap.id,
             serviceTitle: data.serviceTitle ?? data.serviceId ?? "-",
             date: dateObj,
             time: data.time ?? "",
             note: data.note ?? "",
+            ownerName: data.ownerName ?? "",
+            petName: data.petName ?? "",
+            weightKg: weight,
           };
         });
 
@@ -119,7 +135,9 @@ export default function HistoryPage() {
         </p>
 
         {loading && (
-          <p className="text-sm text-slate-500">กำลังโหลดประวัติการใช้บริการ...</p>
+          <p className="text-sm text-slate-500">
+            กำลังโหลดประวัติการใช้บริการ...
+          </p>
         )}
 
         {!loading && bookings.length === 0 && (
@@ -146,6 +164,35 @@ export default function HistoryPage() {
                   <p className="text-xs text-slate-500">
                     {formatThaiDateFull(b.date)} เวลา {b.time} น.
                   </p>
+
+                  {/* แถวใหม่: เจ้าของ + น้อง + น้ำหนัก */}
+                  {(b.ownerName || b.petName || b.weightKg) && (
+                    <p className="mt-1 text-xs text-slate-600">
+                      {b.ownerName && (
+                        <>
+                          เจ้าของ:{" "}
+                          <span className="font-medium">{b.ownerName}</span>
+                        </>
+                      )}
+                      {b.petName && (
+                        <>
+                          {b.ownerName ? " · " : ""}
+                          น้อง:{" "}
+                          <span className="font-medium">{b.petName}</span>
+                        </>
+                      )}
+                      {b.weightKg != null && !Number.isNaN(b.weightKg) && (
+                        <>
+                          {" · "}
+                          น้ำหนัก:{" "}
+                          <span className="font-medium">
+                            {b.weightKg.toFixed(1)} กก.
+                          </span>
+                        </>
+                      )}
+                    </p>
+                  )}
+
                   {b.note && (
                     <p className="mt-1 text-xs text-slate-600">
                       หมายเหตุ: {b.note}
