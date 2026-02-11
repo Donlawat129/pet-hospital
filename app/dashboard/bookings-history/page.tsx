@@ -30,7 +30,7 @@ const SERVICES: {
 
 const serviceTitleMap: Record<ServiceId, string> = SERVICES.reduce(
   (acc, s) => ({ ...acc, [s.id]: s.title }),
-  {} as Record<ServiceId, string>
+  {} as Record<ServiceId, string>,
 );
 
 /* ---------- helper วันที่ ---------- */
@@ -66,6 +66,22 @@ function parseTimeToMinutes(time: string): number {
   return h * 60 + m;
 }
 
+function petSexToThai(petSex?: string | null): string {
+  const v = (petSex ?? "").toLowerCase();
+  if (!v) return "";
+  if (v === "male" || v === "ตัวผู้" || v === "ผู้") return "ตัวผู้";
+  if (v === "female" || v === "ตัวเมีย" || v === "เมีย") return "ตัวเมีย";
+  return petSex ?? "";
+}
+
+function groomerGenderToThai(gender?: string | null): string {
+  const v = (gender ?? "").toLowerCase();
+  if (!v) return "";
+  if (v === "male" || v === "ชาย" || v === "ผู้ชาย") return "ช่างผู้ชาย";
+  if (v === "female" || v === "หญิง" || v === "ผู้หญิง") return "ช่างผู้หญิง";
+  return gender ?? "";
+}
+
 /* ---------- types ---------- */
 
 type BookingHistoryRow = {
@@ -79,10 +95,15 @@ type BookingHistoryRow = {
   note: string;
   createdAt: Date | null;
 
-  // ฟิลด์ใหม่
   ownerName?: string;
   petName?: string;
   weightKg?: number | null;
+
+  ownerPhone?: string;
+  petAgeYears?: number | null;
+  petSex?: string;
+  petBreed?: string;
+  groomerGender?: string;
 };
 
 type BookingDocData = {
@@ -97,8 +118,13 @@ type BookingDocData = {
 
   ownerName?: string;
   petName?: string;
-  // รองรับทั้ง number / string / undefined
   weightKg?: unknown;
+
+  ownerPhone?: string;
+  petAgeYears?: unknown;
+  petSex?: string;
+  petBreed?: string;
+  groomerGender?: string;
 };
 
 type ServiceFilter = "all" | ServiceId;
@@ -133,7 +159,6 @@ export default function BookingsHistoryPage() {
       setCheckingAuth(false);
 
       try {
-        // ✅ แก้ path ให้ถูกต้อง: users/{uid}
         const ref = doc(db, "users", firebaseUser.uid);
         const snap = await getDoc(ref);
         const data = snap.data() as { role?: string } | undefined;
@@ -176,13 +201,22 @@ export default function BookingsHistoryPage() {
 
           const dateObj = dateTs ? dateTs.toDate() : new Date();
 
-          // แปลงน้ำหนักให้เป็น number | null อย่างปลอดภัย
+          // น้ำหนัก
           let weight: number | null = null;
           if (typeof data.weightKg === "number") {
             weight = data.weightKg;
           } else if (typeof data.weightKg === "string") {
             const n = Number(data.weightKg);
             if (!Number.isNaN(n)) weight = n;
+          }
+
+          // อายุ
+          let age: number | null = null;
+          if (typeof data.petAgeYears === "number") {
+            age = data.petAgeYears;
+          } else if (typeof data.petAgeYears === "string") {
+            const n = Number(data.petAgeYears);
+            if (!Number.isNaN(n)) age = n;
           }
 
           return {
@@ -199,13 +233,20 @@ export default function BookingsHistoryPage() {
             ownerName: data.ownerName ?? "",
             petName: data.petName ?? "",
             weightKg: weight,
+            ownerPhone: data.ownerPhone ?? "",
+            petAgeYears: age,
+            petSex: data.petSex ?? "",
+            petBreed: data.petBreed ?? "",
+            groomerGender: data.groomerGender ?? "",
           };
         });
 
         // sort: ล่าสุดอยู่บน (ตามวันนัด + เวลา)
         list.sort((a, b) => {
-          const aKey = a.date.getTime() + parseTimeToMinutes(a.time) * 60_000;
-          const bKey = b.date.getTime() + parseTimeToMinutes(b.time) * 60_000;
+          const aKey =
+            a.date.getTime() + parseTimeToMinutes(a.time) * 60_000;
+          const bKey =
+            b.date.getTime() + parseTimeToMinutes(b.time) * 60_000;
           return bKey - aKey;
         });
 
@@ -254,6 +295,10 @@ export default function BookingsHistoryPage() {
           r.weightKg != null && !Number.isNaN(r.weightKg)
             ? r.weightKg.toString()
             : "";
+        const phone = (r.ownerPhone ?? "").toLowerCase();
+        const breed = (r.petBreed ?? "").toLowerCase();
+        const sex = petSexToThai(r.petSex).toLowerCase();
+        const groomer = groomerGenderToThai(r.groomerGender).toLowerCase();
 
         return (
           emailOrId.includes(q) ||
@@ -262,7 +307,11 @@ export default function BookingsHistoryPage() {
           time.includes(q) ||
           owner.includes(q) ||
           pet.includes(q) ||
-          weightStr.includes(q)
+          weightStr.includes(q) ||
+          phone.includes(q) ||
+          breed.includes(q) ||
+          sex.includes(q) ||
+          groomer.includes(q)
         );
       });
     }
@@ -336,14 +385,15 @@ export default function BookingsHistoryPage() {
             {/* ค้นหา */}
             <div className="flex-1 min-w-[200px]">
               <label className="block text-xs font-medium text-emerald-900 mb-1">
-                ค้นหา (อีเมล / ชื่อบริการ / เจ้าของ / น้อง / หมายเหตุ / เวลา)
+                ค้นหา (อีเมล / ชื่อบริการ / เจ้าของ / น้อง / หมายเหตุ / เวลา /
+                เบอร์โทร)
               </label>
               <input
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 className="w-full rounded-lg border border-emerald-200 bg-white px-3 py-1.5 text-sm text-black outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200"
-                placeholder="เช่น ชื่อลูกค้า, ชื่อเจ้าของ, ชื่อน้อง, อาบน้ำ, 10:30 เป็นต้น"
+                placeholder="เช่น ชื่อลูกค้า, ชื่อเจ้าของ, ชื่อน้อง, เบอร์โทร, อาบน้ำ, 10:30 เป็นต้น"
               />
             </div>
 
@@ -421,7 +471,7 @@ export default function BookingsHistoryPage() {
                     <th className="px-3 py-2 text-left">วันนัด / เวลา</th>
                     <th className="px-3 py-2 text-left">บริการ</th>
                     <th className="px-3 py-2 text-left">
-                      เจ้าของ / สัตว์เลี้ยง / น้ำหนัก
+                      เจ้าของ / สัตว์เลี้ยง / รายละเอียด
                     </th>
                     <th className="px-3 py-2 text-left">ลูกค้า (อีเมล)</th>
                     <th className="px-3 py-2 text-left">หมายเหตุ</th>
@@ -429,85 +479,161 @@ export default function BookingsHistoryPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredRows.map((r) => (
-                    <tr
-                      key={r.id}
-                      className="border-t border-slate-100 hover:bg-emerald-50/40"
-                    >
-                      <td className="px-3 py-2 align-top">
-                        <div className="text-xs text-slate-500">
-                          {formatThaiDateFull(r.date)}
-                        </div>
-                        <div className="text-sm font-medium text-slate-800">
-                          {r.time || "-"}
-                        </div>
-                      </td>
-                      <td className="px-3 py-2 align-top">
-                        <div className="flex items-center gap-1 text-sm">
-                          <span>
-                            {
-                              SERVICES.find(
-                                (s) => s.id === r.serviceId
-                              )?.icon
-                            }
-                          </span>
-                          <span>{r.serviceTitle}</span>
-                        </div>
-                      </td>
-                      <td className="px-3 py-2 align-top text-xs">
-                        {r.ownerName || r.petName || r.weightKg != null ? (
-                          <div className="space-y-0.5">
-                            {r.ownerName && (
-                              <div>
-                                เจ้าของ:{" "}
-                                <span className="font-medium">
-                                  {r.ownerName}
-                                </span>
-                              </div>
-                            )}
-                            {r.petName && (
-                              <div>
-                                น้อง:{" "}
-                                <span className="font-medium">
-                                  {r.petName}
-                                </span>
-                              </div>
-                            )}
-                            {r.weightKg != null &&
-                              !Number.isNaN(r.weightKg) && (
+                  {filteredRows.map((r) => {
+                    const sexLabel = petSexToThai(r.petSex);
+                    const groomerLabel = groomerGenderToThai(
+                      r.groomerGender,
+                    );
+
+                    return (
+                      <tr
+                        key={r.id}
+                        className="border-t border-slate-100 hover:bg-emerald-50/40"
+                      >
+                        <td className="px-3 py-2 align-top">
+                          <div className="text-xs text-slate-500">
+                            {formatThaiDateFull(r.date)}
+                          </div>
+                          <div className="text-sm font-medium text-slate-800">
+                            {r.time || "-"}
+                          </div>
+                        </td>
+                        <td className="px-3 py-2 align-top">
+                          <div className="flex items-center gap-1 text-sm">
+                            <span>
+                              {
+                                SERVICES.find(
+                                  (s) => s.id === r.serviceId,
+                                )?.icon
+                              }
+                            </span>
+                            <span>{r.serviceTitle}</span>
+                          </div>
+                        </td>
+                        <td className="px-3 py-2 align-top text-xs">
+                          {r.ownerName ||
+                          r.ownerPhone ||
+                          r.petName ||
+                          r.petBreed ||
+                          r.petAgeYears != null ||
+                          sexLabel ||
+                          r.weightKg != null ||
+                          groomerLabel ? (
+                            <div className="space-y-0.5">
+                              {(r.ownerName || r.ownerPhone) && (
                                 <div>
-                                  น้ำหนัก:{" "}
+                                  {r.ownerName && (
+                                    <>
+                                      เจ้าของ:{" "}
+                                      <span className="font-medium">
+                                        {r.ownerName}
+                                      </span>
+                                    </>
+                                  )}
+                                  {r.ownerPhone && (
+                                    <>
+                                      {r.ownerName ? " · " : ""}
+                                      เบอร์:{" "}
+                                      <span className="font-medium">
+                                        {r.ownerPhone}
+                                      </span>
+                                    </>
+                                  )}
+                                </div>
+                              )}
+                              {(r.petName ||
+                                r.petBreed ||
+                                r.petAgeYears != null ||
+                                sexLabel ||
+                                r.weightKg != null) && (
+                                <div>
+                                  {r.petName && (
+                                    <>
+                                      น้อง:{" "}
+                                      <span className="font-medium">
+                                        {r.petName}
+                                      </span>
+                                    </>
+                                  )}
+                                  {r.petBreed && (
+                                    <>
+                                      {r.petName ? " · " : ""}
+                                      พันธุ์:{" "}
+                                      <span className="font-medium">
+                                        {r.petBreed}
+                                      </span>
+                                    </>
+                                  )}
+                                  {r.petAgeYears != null &&
+                                    !Number.isNaN(r.petAgeYears) && (
+                                      <>
+                                        {r.petName || r.petBreed ? " · " : ""}
+                                        อายุ:{" "}
+                                        <span className="font-medium">
+                                          {r.petAgeYears}
+                                        </span>{" "}
+                                        ปี
+                                      </>
+                                    )}
+                                  {sexLabel && (
+                                    <>
+                                      {" · "}
+                                      เพศ:{" "}
+                                      <span className="font-medium">
+                                        {sexLabel}
+                                      </span>
+                                    </>
+                                  )}
+                                  {r.weightKg != null &&
+                                    !Number.isNaN(r.weightKg) && (
+                                      <>
+                                        {" · "}
+                                        น้ำหนัก:{" "}
+                                        <span className="font-medium">
+                                          {r.weightKg.toFixed(1)}
+                                        </span>{" "}
+                                        กก.
+                                      </>
+                                    )}
+                                </div>
+                              )}
+                              {groomerLabel && (
+                                <div>
+                                  ช่างที่เลือก:{" "}
                                   <span className="font-medium">
-                                    {r.weightKg.toFixed(1)} กก.
+                                    {groomerLabel}
                                   </span>
                                 </div>
                               )}
+                            </div>
+                          ) : (
+                            <span className="text-slate-400">-</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 align-top text-xs">
+                          <div className="font-medium text-slate-800">
+                            {r.userEmail || r.userId || "-"}
                           </div>
-                        ) : (
-                          <span className="text-slate-400">-</span>
-                        )}
-                      </td>
-                      <td className="px-3 py-2 align-top text-xs">
-                        <div className="font-medium text-slate-800">
-                          {r.userEmail || r.userId || "-"}
-                        </div>
-                      </td>
-                      <td className="px-3 py-2 align-top text-xs">
-                        {r.note || <span className="text-slate-400">-</span>}
-                      </td>
-                      <td className="px-3 py-2 align-top text-xs text-slate-500">
-                        {r.createdAt
-                          ? r.createdAt.toLocaleString("th-TH", {
-                              day: "2-digit",
-                              month: "2-digit",
-                              year: "numeric",
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            })
-                          : "-"}
-                      </td>
-                    </tr>
-                  ))}
+                        </td>
+                        <td className="px-3 py-2 align-top text-xs">
+                          {r.note || (
+                            <span className="text-slate-400">-</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 align-top text-xs text-slate-500">
+                          {r.createdAt
+                            ? r.createdAt.toLocaleString("th-TH", {
+                                day: "2-digit",
+                                month: "2-digit",
+                                year: "numeric",
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })
+                            : "-"}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

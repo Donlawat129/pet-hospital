@@ -30,7 +30,8 @@ const SERVICES: {
     id: "bath",
     icon: "💦",
     title: "อาบน้ำทำความสะอาด",
-    description: "อาบน้ำด้วยแชมพูที่เหมาะกับสภาพผิว ขจัดกลิ่นไม่พึงประสงค์",
+    description:
+      "อาบน้ำด้วยแชมพูที่เหมาะกับสภาพผิว ขจัดกลิ่นไม่พึงประสงค์",
   },
   {
     id: "groom",
@@ -102,6 +103,24 @@ function parseTimeToMinutes(time: string): number {
   }
 
   return h * 60 + m;
+}
+
+// แปลงเพศน้อง → label ภาษาไทย
+function petSexToThai(petSex: string | null | undefined): string {
+  const v = (petSex ?? "").toLowerCase();
+  if (!v) return "";
+  if (v === "male" || v === "ตัวผู้" || v === "ผู้") return "ตัวผู้";
+  if (v === "female" || v === "ตัวเมีย" || v === "เมีย") return "ตัวเมีย";
+  return petSex ?? "";
+}
+
+// แปลงเพศช่าง → label ภาษาไทย
+function groomerGenderToThai(gender: string | null | undefined): string {
+  const v = (gender ?? "").toLowerCase();
+  if (!v) return "";
+  if (v === "male" || v === "ชาย" || v === "ผู้ชาย") return "ช่างผู้ชาย";
+  if (v === "female" || v === "หญิง" || v === "ผู้หญิง") return "ช่างผู้หญิง";
+  return gender ?? "";
 }
 
 /* ---------- Config ขั้นตอนด้านซ้าย ---------- */
@@ -183,7 +202,8 @@ function ClinicInfoCard({ className = "" }: { className?: string }) {
         <p className="flex items-start gap-1">
           <span className="mt-0.5">📍</span>
           <span>
-            9/13 หมู่ 5 สี่แยกไฟแดงยายพาวัดสว่าง ต.ต้นโพธิ์ อ.เมือง จ.สิงห์บุรี
+            9/13 หมู่ 5 สี่แยกไฟแดงยายพาวัดสว่าง ต.ต้นโพธิ์ อ.เมือง
+            จ.สิงห์บุรี
           </span>
         </p>
 
@@ -279,7 +299,8 @@ function LoyaltyCard({ usageCount, loading, isLoggedIn }: LoyaltyCardProps) {
       <div className="space-y-1">
         <p className="text-xs">
           เคยใช้บริการทั้งหมด{" "}
-          <span className="font-semibold text-emerald-700">{total}</span> ครั้ง
+          <span className="font-semibold text-emerald-700">{total}</span>{" "}
+          ครั้ง
         </p>
         <p className="text-xs">
           ได้สิทธิ์ฟรีแล้ว{" "}
@@ -359,10 +380,17 @@ export default function ServicesPage() {
   );
   const [selectedTime, setSelectedTime] = useState<string | null>(null);
 
-  // ฟิลด์ใหม่
+  // ฟิลด์ใหม่ + เดิม
   const [ownerName, setOwnerName] = useState<string>("");
+  const [ownerPhone, setOwnerPhone] = useState<string>("");
   const [petName, setPetName] = useState<string>("");
+  const [petAge, setPetAge] = useState<string>(""); // ปี (string ในฟอร์ม แล้วค่อย parse)
+  const [petSex, setPetSex] = useState<"" | "male" | "female">("");
+  const [petBreed, setPetBreed] = useState<string>("");
   const [petWeight, setPetWeight] = useState<string>(""); // string ในฟอร์ม แล้วค่อย parse เป็น number
+  const [groomerGender, setGroomerGender] = useState<"" | "male" | "female">(
+    "",
+  );
 
   const [note, setNote] = useState<string>("");
   const [saving, setSaving] = useState(false);
@@ -431,7 +459,7 @@ export default function ServicesPage() {
                   next[id] =
                     typeof v === "number" && Number.isFinite(v)
                       ? v
-                      : (prev[id] ?? null);
+                      : prev[id] ?? null;
                 },
               );
               return next;
@@ -448,7 +476,7 @@ export default function ServicesPage() {
     return () => {
       cancelled = true;
     };
-  }, []); // ✅ รันครั้งเดียวตอน mount ไม่ต้องใส่ db
+  }, []); // ✅ รันครั้งเดียวตอน mount
 
   function handleSelectService(id: ServiceId) {
     setSelectedService(id);
@@ -456,11 +484,16 @@ export default function ServicesPage() {
     setSelectedTime(null);
     setNote("");
 
-    // reset เวลาที่จอง + ข้อมูลน้อง
+    // reset เวลาที่จอง + ข้อมูลน้อง + ข้อมูลเจ้าของ
     setBookedTimes([]);
     setOwnerName("");
+    setOwnerPhone("");
     setPetName("");
+    setPetAge("");
+    setPetSex("");
+    setPetBreed("");
     setPetWeight("");
+    setGroomerGender("");
 
     if (bookingSectionRef.current) {
       bookingSectionRef.current.scrollIntoView({
@@ -564,8 +597,13 @@ export default function ServicesPage() {
     const service = SERVICES.find((s) => s.id === selectedService);
 
     const owner = ownerName.trim();
+    const phone = ownerPhone.trim();
     const pet = petName.trim();
+    const ageStr = petAge.trim();
+    const sex = petSex;
+    const breed = petBreed.trim();
     const weightStr = petWeight.trim();
+    const groomer = groomerGender;
 
     // validate เบื้องต้น
     if (!owner || !pet) {
@@ -573,7 +611,18 @@ export default function ServicesPage() {
       return;
     }
 
-    // แปลงน้ำหนักแบบปลอดภัย
+    // แปลงอายุแบบปลอดภัย (ไม่บังคับกรอก)
+    let ageNum: number | null = null;
+    if (ageStr !== "") {
+      const parsedAge = Number.parseFloat(ageStr.replace(",", "."));
+      if (!Number.isFinite(parsedAge) || parsedAge <= 0) {
+        alert("กรุณากรอกอายุของน้องเป็นตัวเลขมากกว่า 0");
+        return;
+      }
+      ageNum = parsedAge;
+    }
+
+    // แปลงน้ำหนักแบบปลอดภัย (ไม่บังคับกรอก)
     let weightNum: number | null = null;
     if (weightStr !== "") {
       const parsed = Number.parseFloat(weightStr.replace(",", "."));
@@ -599,8 +648,13 @@ export default function ServicesPage() {
 
         // ฟิลด์ใหม่
         ownerName: owner,
+        ownerPhone: phone,
         petName: pet,
+        petAgeYears: ageNum,
+        petSex: sex || null,
+        petBreed: breed || null,
         weightKg: weightNum,
+        groomerGender: groomer || null,
       });
 
       // อัพเดทให้ช่องเวลานี้เป็น "เต็ม" ทันที
@@ -615,15 +669,33 @@ export default function ServicesPage() {
 
       const price = selectedService ? servicePrices[selectedService] : null;
 
+      const sexLabel = petSexToThai(sex);
+      const groomerLabel = groomerGenderToThai(groomer);
+
       let msg =
         `จองคิวสำเร็จ\n` +
         `บริการ: ${service?.title ?? selectedService}\n` +
         `วันที่: ${formatThaiDateFull(date)}\n` +
         `เวลา: ${selectedTime} น.\n` +
-        `เจ้าของ: ${owner}\n` +
-        `สัตว์เลี้ยง: ${pet}\n`;
+        `เจ้าของ: ${owner}\n`;
+      if (phone) {
+        msg += `เบอร์โทร: ${phone}\n`;
+      }
+      msg += `สัตว์เลี้ยง: ${pet}\n`;
+      if (breed) {
+        msg += `พันธุ์: ${breed}\n`;
+      }
+      if (ageNum != null) {
+        msg += `อายุ: ${ageNum} ปี\n`;
+      }
+      if (sexLabel) {
+        msg += `เพศ: ${sexLabel}\n`;
+      }
       if (weightNum != null) {
         msg += `น้ำหนัก: ${weightNum} กก.\n`;
+      }
+      if (groomerLabel) {
+        msg += `ช่างที่เลือก: ${groomerLabel}\n`;
       }
       if (price != null && Number.isFinite(price)) {
         msg += `ราคาโดยประมาณ: ${price.toLocaleString("th-TH")} บาท\n`;
@@ -684,8 +756,8 @@ export default function ServicesPage() {
                     index < safeCurrentStep
                       ? "done"
                       : index === safeCurrentStep
-                        ? "active"
-                        : "pending";
+                      ? "active"
+                      : "pending";
 
                   const isActive = status === "active";
                   const isDone = status === "done";
@@ -698,8 +770,8 @@ export default function ServicesPage() {
                         isActive
                           ? "border-emerald-500 bg-emerald-50 shadow-sm"
                           : isDone
-                            ? "border-emerald-100 bg-emerald-50/40"
-                            : "border-slate-100 bg-white/60",
+                          ? "border-emerald-100 bg-emerald-50/40"
+                          : "border-slate-100 bg-white/60",
                       ].join(" ")}
                     >
                       <div
@@ -708,8 +780,8 @@ export default function ServicesPage() {
                           isActive
                             ? "bg-emerald-600 text-white"
                             : isDone
-                              ? "bg-emerald-100 text-emerald-700"
-                              : "bg-slate-100 text-slate-400",
+                            ? "bg-emerald-100 text-emerald-700"
+                            : "bg-slate-100 text-slate-400",
                         ].join(" ")}
                       >
                         {isDone ? "✓" : index + 1}
@@ -949,6 +1021,8 @@ export default function ServicesPage() {
                     <p className="text-sm font-medium text-slate-700">
                       ข้อมูลเจ้าของ & สัตว์เลี้ยง
                     </p>
+
+                    {/* แถว: ชื่อเจ้าของ + เบอร์โทร */}
                     <div className="grid gap-3 sm:grid-cols-2">
                       <div>
                         <label className="block text-xs font-medium text-slate-600 mb-1">
@@ -964,6 +1038,22 @@ export default function ServicesPage() {
                       </div>
                       <div>
                         <label className="block text-xs font-medium text-slate-600 mb-1">
+                          เบอร์โทรติดต่อ
+                        </label>
+                        <input
+                          type="tel"
+                          value={ownerPhone}
+                          onChange={(e) => setOwnerPhone(e.target.value)}
+                          className="w-full rounded-xl border border-emerald-100 bg-white px-3 py-2 text-sm text-black outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
+                          placeholder="เช่น 089-123-4567"
+                        />
+                      </div>
+                    </div>
+
+                    {/* แถว: ชื่อน้อง + อายุ */}
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div>
+                        <label className="block text-xs font-medium text-slate-600 mb-1">
                           ชื่อสัตว์เลี้ยง{" "}
                           <span className="text-red-500">*</span>
                         </label>
@@ -975,8 +1065,55 @@ export default function ServicesPage() {
                           placeholder="เช่น น้องปอม, น้องหมูทอด"
                         />
                       </div>
+                      <div>
+                        <label className="block text-xs font-medium text-slate-600 mb-1">
+                          อายุโดยประมาณ (ปี)
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          step="0.1"
+                          value={petAge}
+                          onChange={(e) => setPetAge(e.target.value)}
+                          className="w-full rounded-xl border border-emerald-100 bg-white px-3 py-2 text-sm text-black outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
+                          placeholder="เช่น 2.5"
+                        />
+                      </div>
                     </div>
 
+                    {/* แถว: พันธุ์ + เพศ */}
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div>
+                        <label className="block text-xs font-medium text-slate-600 mb-1">
+                          พันธุ์
+                        </label>
+                        <input
+                          type="text"
+                          value={petBreed}
+                          onChange={(e) => setPetBreed(e.target.value)}
+                          className="w-full rounded-xl border border-emerald-100 bg-white px-3 py-2 text-sm text-black outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
+                          placeholder="เช่น ปอมเมอเรเนียน, พุดเดิ้ล ฯลฯ"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-slate-600 mb-1">
+                          เพศ
+                        </label>
+                        <select
+                          value={petSex}
+                          onChange={(e) =>
+                            setPetSex(e.target.value as "" | "male" | "female")
+                          }
+                          className="w-full rounded-xl border border-emerald-100 bg-white px-3 py-2 text-sm text-black outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
+                        >
+                          <option value="">ไม่ระบุ</option>
+                          <option value="male">ตัวผู้</option>
+                          <option value="female">ตัวเมีย</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* น้ำหนัก */}
                     <div>
                       <label className="block text-xs font-medium text-slate-600 mb-1">
                         น้ำหนักโดยประมาณ (กก.)
@@ -990,6 +1127,26 @@ export default function ServicesPage() {
                         className="w-full max-w-xs rounded-xl border border-emerald-100 bg-white px-3 py-2 text-sm text-black outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
                         placeholder="เช่น 4.5"
                       />
+                    </div>
+
+                    {/* เลือกช่าง */}
+                    <div>
+                      <label className="block text-xs font-medium text-slate-600 mb-1">
+                        เลือกช่างที่ต้องการ (ไม่จำเป็น)
+                      </label>
+                      <select
+                        value={groomerGender}
+                        onChange={(e) =>
+                          setGroomerGender(
+                            e.target.value as "" | "male" | "female",
+                          )
+                        }
+                        className="w-full max-w-xs rounded-xl border border-emerald-100 bg-white px-3 py-2 text-sm text-black outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
+                      >
+                        <option value="">ไม่ระบุ</option>
+                        <option value="male">ช่างผู้ชาย</option>
+                        <option value="female">ช่างผู้หญิง</option>
+                      </select>
                     </div>
                   </div>
                 )}
@@ -1046,8 +1203,7 @@ export default function ServicesPage() {
                               <span className="font-medium text-slate-500">
                                 ราคาโดยประมาณ:
                               </span>{" "}
-                              {selectedPrice.toLocaleString("th-TH")} บาท /
-                              ครั้ง
+                              {selectedPrice.toLocaleString("th-TH")} บาท / ครั้ง
                             </p>
                           )}
                         <p>
@@ -1055,6 +1211,16 @@ export default function ServicesPage() {
                             เจ้าของ:
                           </span>{" "}
                           {ownerName || (
+                            <span className="text-slate-400 italic">
+                              ยังไม่ได้ระบุ
+                            </span>
+                          )}
+                        </p>
+                        <p>
+                          <span className="font-medium text-slate-500">
+                            เบอร์โทร:
+                          </span>{" "}
+                          {ownerPhone || (
                             <span className="text-slate-400 italic">
                               ยังไม่ได้ระบุ
                             </span>
@@ -1072,6 +1238,40 @@ export default function ServicesPage() {
                         </p>
                         <p>
                           <span className="font-medium text-slate-500">
+                            พันธุ์:
+                          </span>{" "}
+                          {petBreed || (
+                            <span className="text-slate-400 italic">
+                              ยังไม่ได้ระบุ
+                            </span>
+                          )}
+                        </p>
+                        <p>
+                          <span className="font-medium text-slate-500">
+                            อายุ:
+                          </span>{" "}
+                          {petAge ? (
+                            `${petAge} ปี`
+                          ) : (
+                            <span className="text-slate-400 italic">
+                              ยังไม่ได้ระบุ
+                            </span>
+                          )}
+                        </p>
+                        <p>
+                          <span className="font-medium text-slate-500">
+                            เพศ:
+                          </span>{" "}
+                          {petSex ? (
+                            petSexToThai(petSex)
+                          ) : (
+                            <span className="text-slate-400 italic">
+                              ยังไม่ได้ระบุ
+                            </span>
+                          )}
+                        </p>
+                        <p>
+                          <span className="font-medium text-slate-500">
                             น้ำหนัก:
                           </span>{" "}
                           {petWeight ? (
@@ -1079,6 +1279,18 @@ export default function ServicesPage() {
                           ) : (
                             <span className="text-slate-400 italic">
                               ยังไม่ได้ระบุ
+                            </span>
+                          )}
+                        </p>
+                        <p>
+                          <span className="font-medium text-slate-500">
+                            ช่างที่เลือก:
+                          </span>{" "}
+                          {groomerGender ? (
+                            groomerGenderToThai(groomerGender)
+                          ) : (
+                            <span className="text-slate-400 italic">
+                              ไม่ระบุ
                             </span>
                           )}
                         </p>
