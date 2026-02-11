@@ -1,3 +1,4 @@
+// app/dashboard/page.tsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -11,6 +12,7 @@ import {
   query,
   where,
   Timestamp,
+  setDoc,
 } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 
@@ -42,7 +44,6 @@ const TH_MONTH_SHORT = [
   "ก.พ.",
   "มี.ค.",
   "เม.ย.",
-  "พ.ค.",
   "มิ.ย.",
   "ก.ค.",
   "ส.ค.",
@@ -74,6 +75,28 @@ function parseTimeToMinutes(time: string): number {
   if (Number.isNaN(h) || Number.isNaN(m)) return 0;
   return h * 60 + m;
 }
+
+/* ---------- default time slots (ใช้เป็นค่าเริ่มต้นถ้าไม่มี config) ---------- */
+
+const DEFAULT_TIME_SLOTS: string[] = [
+  "10:00",
+  "10:30",
+  "11:00",
+  "11:30",
+  "12:00",
+  "12:30",
+  "13:00",
+  "13:30",
+  "14:00",
+  "14:30",
+  "15:00",
+  "15:30",
+  "16:00",
+  "16:30",
+  "17:00",
+  "17:30",
+  "18:00",
+];
 
 /* ---------- types ---------- */
 
@@ -110,6 +133,11 @@ type BookingDocData = {
   petWeightKg?: number;
 };
 
+type ServicesConfigDoc = {
+  timeSlots?: string[];
+  prices?: Partial<Record<ServiceId, number>>;
+};
+
 export default function AdminDashboardPage() {
   const router = useRouter();
 
@@ -136,6 +164,20 @@ export default function AdminDashboardPage() {
   const [bookings, setBookings] = useState<AdminBookingRow[]>([]);
   const [loadingBookings, setLoadingBookings] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  /* ---------- state สำหรับตั้งค่าเวลาเปิด + ราคา ---------- */
+
+  const [configLoading, setConfigLoading] = useState(true);
+  const [configSaving, setConfigSaving] = useState(false);
+  const [configError, setConfigError] = useState<string | null>(null);
+
+  const [timeSlotsInput, setTimeSlotsInput] = useState("");
+  const [priceInputs, setPriceInputs] = useState<Record<ServiceId, string>>({
+    bath: "",
+    groom: "",
+    nail: "",
+    combo: "",
+  });
 
   /* ---------- เช็ค login + role admin ---------- */
   useEffect(() => {
@@ -169,6 +211,126 @@ export default function AdminDashboardPage() {
 
     return () => unsub();
   }, [router]);
+
+  /* ---------- โหลด config เวลาเปิด + ราคา ---------- */
+
+  useEffect(() => {
+    if (!isAdmin || checkingAuth || checkingRole) return;
+
+    (async () => {
+      setConfigLoading(true);
+      setConfigError(null);
+
+      try {
+        const ref = doc(db, "settings", "servicesConfig");
+        const snap = await getDoc(ref);
+
+        if (!snap.exists()) {
+          // ยังไม่มี doc → ใช้ค่า default
+          setTimeSlotsInput(DEFAULT_TIME_SLOTS.join(", "));
+          setPriceInputs({
+            bath: "",
+            groom: "",
+            nail: "",
+            combo: "",
+          });
+          return;
+        }
+
+        const data = snap.data() as ServicesConfigDoc;
+
+        // timeSlots
+        const slots = Array.isArray(data.timeSlots)
+          ? data.timeSlots.map((t) => String(t).trim()).filter(Boolean)
+          : DEFAULT_TIME_SLOTS;
+
+        setTimeSlotsInput(
+          (slots.length > 0 ? slots : DEFAULT_TIME_SLOTS).join(", "),
+        );
+
+        // prices
+        const nextPrices: Record<ServiceId, string> = {
+          bath: "",
+          groom: "",
+          nail: "",
+          combo: "",
+        };
+
+        if (data.prices) {
+          (["bath", "groom", "nail", "combo"] as ServiceId[]).forEach((id) => {
+            const v = data.prices?.[id];
+            nextPrices[id] =
+              typeof v === "number" && Number.isFinite(v) ? String(v) : "";
+          });
+        }
+
+        setPriceInputs(nextPrices);
+      } catch (err) {
+        console.error("โหลด servicesConfig ไม่สำเร็จ", err);
+        setConfigError("โหลดการตั้งค่าสำหรับบริการไม่สำเร็จ");
+        setTimeSlotsInput(DEFAULT_TIME_SLOTS.join(", "));
+      } finally {
+        setConfigLoading(false);
+      }
+    })();
+  }, [isAdmin, checkingAuth, checkingRole]);
+
+  async function handleSaveConfig() {
+    setConfigError(null);
+
+    // 1) parse timeSlots จาก input
+    const rawTokens = timeSlotsInput
+      .split(/[,，\n]/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    const timeRegex = /^([01]?\d|2[0-3]):[0-5]\d$/;
+    const slots: string[] = [];
+
+    for (const t of rawTokens) {
+      if (timeRegex.test(t) && !slots.includes(t)) {
+        slots.push(t);
+      }
+    }
+
+    if (slots.length === 0) {
+      setConfigError("กรุณาระบุช่วงเวลาในรูปแบบ HH:MM อย่างน้อย 1 ช่วง");
+      return;
+    }
+
+    // sort เวลาให้เป็นลำดับจากเช้าไปเย็น
+    slots.sort((a, b) => parseTimeToMinutes(a) - parseTimeToMinutes(b));
+
+    // 2) parse prices
+    const prices: Partial<Record<ServiceId, number>> = {};
+    (["bath", "groom", "nail", "combo"] as ServiceId[]).forEach((id) => {
+      const raw = priceInputs[id].trim();
+      if (!raw) return;
+      const n = Number(raw.replace(/,/g, ""));
+      if (Number.isFinite(n) && n >= 0) {
+        prices[id] = n;
+      }
+    });
+
+    try {
+      setConfigSaving(true);
+      const ref = doc(db, "settings", "servicesConfig");
+      await setDoc(
+        ref,
+        {
+          timeSlots: slots,
+          prices,
+          updatedAt: Timestamp.now(),
+        } satisfies ServicesConfigDoc & { updatedAt: Timestamp },
+        { merge: true },
+      );
+    } catch (err) {
+      console.error("บันทึก servicesConfig ไม่สำเร็จ", err);
+      setConfigError("ไม่สามารถบันทึกการตั้งค่าได้ กรุณาลองใหม่อีกครั้ง");
+    } finally {
+      setConfigSaving(false);
+    }
+  }
 
   /* ---------- โหลด bookings ของวันที่เลือก ---------- */
   useEffect(() => {
@@ -210,9 +372,7 @@ export default function AdminDashboardPage() {
             ownerName: data.ownerName ?? "",
             petName: data.petName ?? "",
             petWeightKg:
-              typeof data.petWeightKg === "number"
-                ? data.petWeightKg
-                : null,
+              typeof data.petWeightKg === "number" ? data.petWeightKg : null,
           };
         });
 
@@ -387,6 +547,102 @@ export default function AdminDashboardPage() {
           ))}
         </section>
 
+        {/* การตั้งค่าเวลาเปิด & ราคา */}
+        <section className="rounded-2xl border border-emerald-100 bg-emerald-50/70 px-4 py-4 space-y-3">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-semibold text-emerald-800">
+                ตั้งค่าช่วงเวลาเปิดให้จอง & ราคาต่อบริการ
+              </h2>
+              <p className="text-[11px] text-slate-600 mt-0.5">
+                การตั้งค่านี้จะใช้กับหน้าจองคิวของลูกค้าทั้งหมด
+              </p>
+            </div>
+            <div className="text-[11px] text-slate-500">
+              {configLoading
+                ? "กำลังโหลดการตั้งค่า..."
+                : "แก้ไขได้ตลอดเวลาแล้วกดบันทึกด้านล่าง"}
+            </div>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
+            {/* timeSlots editor */}
+            <div>
+              <label className="block text-xs font-medium text-emerald-900 mb-1">
+                ช่วงเวลาที่เปิดให้จอง (รูปแบบ HH:MM)
+              </label>
+              <textarea
+                rows={3}
+                value={timeSlotsInput}
+                onChange={(e) => setTimeSlotsInput(e.target.value)}
+                className="w-full rounded-xl border border-emerald-200 bg-white px-3 py-2 text-xs text-black outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 resize-none"
+                placeholder="เช่น 10:00, 10:30, 11:00, ... , 18:00"
+              />
+              <p className="mt-1 text-[11px] text-slate-500">
+                สามารถคั่นด้วยเครื่องหมายจุลภาค หรือขึ้นบรรทัดใหม่ก็ได้
+                ระบบจะจัดเรียงเวลาให้อัตโนมัติ
+              </p>
+            </div>
+
+            {/* price editor */}
+            <div>
+              <label className="block text-xs font-medium text-emerald-900 mb-1">
+                ราคาต่อครั้งของแต่ละบริการ (บาท)
+              </label>
+              <div className="grid gap-2 grid-cols-1 sm:grid-cols-2">
+                {SERVICES.map((s) => (
+                  <div key={s.id}>
+                    <p className="text-[11px] text-slate-500 mb-0.5 flex items-center gap-1">
+                      <span>{s.icon}</span>
+                      <span>{s.title}</span>
+                    </p>
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="number"
+                        min={0}
+                        value={priceInputs[s.id]}
+                        onChange={(e) =>
+                          setPriceInputs((prev) => ({
+                            ...prev,
+                            [s.id]: e.target.value,
+                          }))
+                        }
+                        className="w-full rounded-xl border border-emerald-200 bg-white px-3 py-1.5 text-xs text-black outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200"
+                        placeholder="เช่น 350"
+                      />
+                      <span className="text-[11px] text-slate-500">บาท</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <p className="mt-1 text-[11px] text-slate-500">
+                ถ้าปล่อยว่าง ระบบจะไม่แสดงราคาในหน้าลูกค้า
+              </p>
+            </div>
+          </div>
+
+          {configError && (
+            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[11px] text-red-700">
+              {configError}
+            </div>
+          )}
+
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={handleSaveConfig}
+              disabled={configSaving || configLoading}
+              className={[
+                "inline-flex items-center justify-center rounded-lg px-4 py-2 text-xs font-semibold shadow-sm",
+                "bg-emerald-600 text-white hover:bg-emerald-700",
+                "disabled:opacity-60 disabled:cursor-not-allowed",
+              ].join(" ")}
+            >
+              {configSaving ? "กำลังบันทึกการตั้งค่า..." : "บันทึกการตั้งค่า"}
+            </button>
+          </div>
+        </section>
+
         {/* ตารางคิวลูกค้า (การ์ด) */}
         <section className="space-y-3">
           <h2 className="text-sm font-semibold text-slate-800">
@@ -431,7 +687,10 @@ export default function AdminDashboardPage() {
                       <p className="mt-1 text-xs text-slate-600">
                         {b.ownerName && (
                           <>
-                            เจ้าของ: <span className="font-medium">{b.ownerName}</span>
+                            เจ้าของ:{" "}
+                            <span className="font-medium">
+                              {b.ownerName}
+                            </span>
                           </>
                         )}
                         {b.petName && (

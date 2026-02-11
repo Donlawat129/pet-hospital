@@ -12,6 +12,8 @@ import {
   where,
   Timestamp,
   serverTimestamp,
+  doc,
+  getDoc,
 } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
 
@@ -181,8 +183,7 @@ function ClinicInfoCard({ className = "" }: { className?: string }) {
         <p className="flex items-start gap-1">
           <span className="mt-0.5">📍</span>
           <span>
-            9/13 หมู่ 5 สี่แยกไฟแดงยายพาวัดสว่าง ต.ต้นโพธิ์ อ.เมือง
-            จ.สิงห์บุรี
+            9/13 หมู่ 5 สี่แยกไฟแดงยายพาวัดสว่าง ต.ต้นโพธิ์ อ.เมือง จ.สิงห์บุรี
           </span>
         </p>
 
@@ -278,8 +279,7 @@ function LoyaltyCard({ usageCount, loading, isLoggedIn }: LoyaltyCardProps) {
       <div className="space-y-1">
         <p className="text-xs">
           เคยใช้บริการทั้งหมด{" "}
-          <span className="font-semibold text-emerald-700">{total}</span>{" "}
-          ครั้ง
+          <span className="font-semibold text-emerald-700">{total}</span> ครั้ง
         </p>
         <p className="text-xs">
           ได้สิทธิ์ฟรีแล้ว{" "}
@@ -298,8 +298,7 @@ function LoyaltyCard({ usageCount, loading, isLoggedIn }: LoyaltyCardProps) {
           ))}
         </div>
         <p className="text-[11px] text-emerald-700 mt-1">
-          เหลืออีก{" "}
-          <span className="font-semibold">{remaining}</span>{" "}
+          เหลืออีก <span className="font-semibold">{remaining}</span>{" "}
           ครั้งจะได้สิทธิ์ฟรีรอบถัดไป
         </p>
       </div>
@@ -307,10 +306,50 @@ function LoyaltyCard({ usageCount, loading, isLoggedIn }: LoyaltyCardProps) {
   );
 }
 
+/* ---------- Firestore config doc ---------- */
+
+type ServicesConfigDoc = {
+  timeSlots?: string[];
+  prices?: Partial<Record<ServiceId, number>>;
+};
+
 export default function ServicesPage() {
   // เวลาปัจจุบัน (นาทีตั้งแต่ 00:00) สำหรับปิด slot ที่เลยเวลาแล้วใน "วันนี้"
   const now = new Date();
   const nowMinutes = now.getHours() * 60 + now.getMinutes();
+
+  const DEFAULT_TIME_SLOTS = useMemo(
+    () => [
+      "10:00",
+      "10:30",
+      "11:00",
+      "11:30",
+      "12:00",
+      "12:30",
+      "13:00",
+      "13:30",
+      "14:00",
+      "14:30",
+      "15:00",
+      "15:30",
+      "16:00",
+      "16:30",
+      "17:00",
+      "17:30",
+      "18:00",
+    ],
+    [],
+  );
+
+  const [timeSlots, setTimeSlots] = useState<string[]>(DEFAULT_TIME_SLOTS);
+  const [servicePrices, setServicePrices] = useState<
+    Record<ServiceId, number | null>
+  >({
+    bath: null,
+    groom: null,
+    nail: null,
+    combo: null,
+  });
 
   const [selectedService, setSelectedService] = useState<ServiceId | null>(
     null,
@@ -339,30 +378,6 @@ export default function ServicesPage() {
   const [usageLoading, setUsageLoading] = useState<boolean>(true);
   const [isLoggedIn, setIsLoggedIn] = useState<boolean | null>(null);
 
-  // เวลาเปิด-ปิดร้าน: 10:00 - 18:00
-  const timeSlots = useMemo(
-    () => [
-      "10:00",
-      "10:30",
-      "11:00",
-      "11:30",
-      "12:00",
-      "12:30",
-      "13:00",
-      "13:30",
-      "14:00",
-      "14:30",
-      "15:00",
-      "15:30",
-      "16:00",
-      "16:30",
-      "17:00",
-      "17:30",
-      "18:00",
-    ],
-    [],
-  );
-
   // วันที่ 14 วันถัดไป (รวมวันนี้)
   const days = useMemo(() => {
     const today = new Date();
@@ -375,6 +390,65 @@ export default function ServicesPage() {
     }
     return result;
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadConfig() {
+      try {
+        const ref = doc(db, "settings", "servicesConfig");
+        const snap = await getDoc(ref);
+        if (!snap.exists()) {
+          return;
+        }
+
+        const data = snap.data() as ServicesConfigDoc;
+
+        if (!cancelled) {
+          // --- timeSlots จาก config ---
+          if (Array.isArray(data.timeSlots) && data.timeSlots.length > 0) {
+            const cleaned = data.timeSlots
+              .map((t) => String(t).trim())
+              .filter(Boolean);
+
+            const unique: string[] = [];
+            for (const t of cleaned) {
+              if (!unique.includes(t)) unique.push(t);
+            }
+
+            if (unique.length > 0) {
+              setTimeSlots(unique);
+            }
+          }
+
+          // --- ราคาต่อบริการ ---
+          if (data.prices) {
+            setServicePrices((prev) => {
+              const next: Record<ServiceId, number | null> = { ...prev };
+              (["bath", "groom", "nail", "combo"] as ServiceId[]).forEach(
+                (id) => {
+                  const v = data.prices?.[id];
+                  next[id] =
+                    typeof v === "number" && Number.isFinite(v)
+                      ? v
+                      : (prev[id] ?? null);
+                },
+              );
+              return next;
+            });
+          }
+        }
+      } catch (err) {
+        console.error("โหลด servicesConfig ไม่สำเร็จ", err);
+      }
+    }
+
+    loadConfig();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []); // ✅ รันครั้งเดียวตอน mount ไม่ต้องใส่ db
 
   function handleSelectService(id: ServiceId) {
     setSelectedService(id);
@@ -539,6 +613,8 @@ export default function ServicesPage() {
       // อัพเดทจำนวนครั้งสะสมใน card ทันที +1
       setUsageCount((prev) => (prev == null ? 1 : prev + 1));
 
+      const price = selectedService ? servicePrices[selectedService] : null;
+
       let msg =
         `จองคิวสำเร็จ\n` +
         `บริการ: ${service?.title ?? selectedService}\n` +
@@ -548,6 +624,9 @@ export default function ServicesPage() {
         `สัตว์เลี้ยง: ${pet}\n`;
       if (weightNum != null) {
         msg += `น้ำหนัก: ${weightNum} กก.\n`;
+      }
+      if (price != null && Number.isFinite(price)) {
+        msg += `ราคาโดยประมาณ: ${price.toLocaleString("th-TH")} บาท\n`;
       }
       if (note.trim()) {
         msg += `หมายเหตุ: ${note.trim()}`;
@@ -575,8 +654,10 @@ export default function ServicesPage() {
   }, [selectedService, selectedDateIndex, selectedTime, ownerName, petName]);
 
   const safeCurrentStep = Math.min(currentStepIndex, STEP_CONFIG.length - 1);
-  const progressPercent =
-    ((safeCurrentStep + 1) / STEP_CONFIG.length) * 100;
+  const progressPercent = ((safeCurrentStep + 1) / STEP_CONFIG.length) * 100;
+
+  const selectedPrice =
+    selectedService != null ? servicePrices[selectedService] : null;
 
   return (
     <div className="min-h-screen bg-linear-to-br from-emerald-50 via-white to-sky-50">
@@ -699,30 +780,39 @@ export default function ServicesPage() {
 
             {/* ปุ่มเลือกบริการ */}
             <div className="grid gap-3 sm:gap-4 sm:grid-cols-2">
-              {SERVICES.map((service) => (
-                <button
-                  key={service.id}
-                  type="button"
-                  onClick={() => handleSelectService(service.id)}
-                  className={[
-                    "rounded-xl border p-3 sm:p-4 text-left shadow-sm hover:shadow-md transition",
-                    "border-emerald-100 bg-white",
-                    selectedService === service.id
-                      ? "ring-2 ring-emerald-400 border-emerald-300"
-                      : "",
-                  ].join(" ")}
-                >
-                  <div className="text-2xl mb-1.5 sm:mb-2">
-                    {service.icon}
-                  </div>
-                  <div className="font-semibold text-slate-800 text-sm sm:text-base">
-                    {service.title}
-                  </div>
-                  <div className="text-[11px] sm:text-xs text-slate-500 mt-1">
-                    {service.description}
-                  </div>
-                </button>
-              ))}
+              {SERVICES.map((service) => {
+                const price = servicePrices[service.id];
+                return (
+                  <button
+                    key={service.id}
+                    type="button"
+                    onClick={() => handleSelectService(service.id)}
+                    className={[
+                      "rounded-xl border p-3 sm:p-4 text-left shadow-sm hover:shadow-md transition",
+                      "border-emerald-100 bg-white",
+                      selectedService === service.id
+                        ? "ring-2 ring-emerald-400 border-emerald-300"
+                        : "",
+                    ].join(" ")}
+                  >
+                    <div className="text-2xl mb-1.5 sm:mb-2">
+                      {service.icon}
+                    </div>
+                    <div className="font-semibold text-slate-800 text-sm sm:text-base">
+                      {service.title}
+                    </div>
+                    <div className="text-[11px] sm:text-xs text-slate-500 mt-1">
+                      {service.description}
+                    </div>
+                    {price != null && Number.isFinite(price) && (
+                      <div className="mt-1 text-[11px] text-emerald-700 font-semibold">
+                        ราคาโดยประมาณ {price.toLocaleString("th-TH")} บาท /
+                        ครั้ง
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
             </div>
 
             {/* ---- ส่วนจองคิว ---- */}
@@ -741,6 +831,14 @@ export default function ServicesPage() {
                     {SERVICES.find((s) => s.id === selectedService)?.title ??
                       "ไม่ทราบบริการ"}
                   </span>
+                  {selectedPrice != null && Number.isFinite(selectedPrice) && (
+                    <>
+                      {" · "}
+                      <span className="font-semibold text-emerald-700">
+                        {selectedPrice.toLocaleString("th-TH")} บาท / ครั้ง
+                      </span>
+                    </>
+                  )}
                 </p>
 
                 {/* เลือกวันที่ */}
@@ -942,6 +1040,16 @@ export default function ServicesPage() {
                           </span>{" "}
                           {selectedTime} น.
                         </p>
+                        {selectedPrice != null &&
+                          Number.isFinite(selectedPrice) && (
+                            <p>
+                              <span className="font-medium text-slate-500">
+                                ราคาโดยประมาณ:
+                              </span>{" "}
+                              {selectedPrice.toLocaleString("th-TH")} บาท /
+                              ครั้ง
+                            </p>
+                          )}
                         <p>
                           <span className="font-medium text-slate-500">
                             เจ้าของ:
