@@ -832,7 +832,7 @@ export default function AdminDashboardPage() {
         </div>
 
         {/* Tabs */}
-        <div className="mt-3 border-b border-emerald-100">
+        <div className="mt-3 pb-3 border-b border-emerald-100 ">
           <div className="inline-flex rounded-full bg-emerald-50 p-1 text-xs">
             <button
               type="button"
